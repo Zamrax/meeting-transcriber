@@ -79,7 +79,7 @@ jobs:
                 <key>CFBundleExecutable</key>
                 <string>${APP_NAME}</string>
                 <key>CFBundleIdentifier</key>
-                <string>com.yourname.meeting-assistant</string>
+                <string>com.zamrax.meeting-assistant</string>
                 <key>CFBundleName</key>
                 <string>${APP_NAME}</string>
                 <key>CFBundlePackageType</key>
@@ -103,7 +103,6 @@ jobs:
           name: ${{ matrix.target }}-artifact
           path: ${{ matrix.artifact }}
       
-
   release:
     needs: build
     runs-on: ubuntu-latest
