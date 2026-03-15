@@ -68,9 +68,9 @@ jobs:
             mkdir -p "$BUNDLE_DIR"
             cp "${{ matrix.binary }}" "$BUNDLE_DIR/${APP_NAME}"
             
-            # Ensure the binary is executable
             chmod +x "$BUNDLE_DIR/${APP_NAME}"
             
+            # Note: The closing EOF MUST be at the very start of the line
             cat <<EOF > "${APP_NAME}.app/Contents/Info.plist"
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -90,7 +90,7 @@ jobs:
                 <string>10.12</string>
             </dict>
             </plist>
-            EOF
+          EOF
             
             zip -r "${{ matrix.artifact }}" "${APP_NAME}.app"
           else
