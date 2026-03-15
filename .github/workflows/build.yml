@@ -1,0 +1,94 @@
+name: Build Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: meeting-transcriber-windows-x64.exe
+            binary: target/x86_64-pc-windows-msvc/release/meeting-transcriber.exe
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: meeting-transcriber-macos-arm64
+            binary: target/aarch64-apple-darwin/release/meeting-transcriber
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: meeting-transcriber-macos-x64
+            binary: target/x86_64-apple-darwin/release/meeting-transcriber
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: meeting-transcriber-linux-x64
+            binary: target/x86_64-unknown-linux-gnu/release/meeting-transcriber
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.target }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgtk-3-dev
+
+      - name: Build release binary
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: cargo build --release --target "$BUILD_TARGET"
+
+      - name: Rename artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        env:
+          SRC: ${{ matrix.binary }}
+          DST: ${{ matrix.artifact }}
+        run: cp "$SRC" "$DST"
+
+      - name: Rename artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          SRC: ${{ matrix.binary }}
+          DST: ${{ matrix.artifact }}
+        run: copy "$env:SRC" "$env:DST"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
