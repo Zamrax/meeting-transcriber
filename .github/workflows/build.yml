@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     strategy:
@@ -52,23 +56,15 @@ jobs:
           sudo apt-get install -y libasound2-dev libgtk-3-dev
 
       - name: Build release binary
+        run: cargo build --release --target "$BUILD_TARGET"
         env:
           BUILD_TARGET: ${{ matrix.target }}
-        run: cargo build --release --target "$BUILD_TARGET"
 
-      - name: Rename artifact (Unix)
-        if: matrix.os != 'windows-latest'
-        env:
-          SRC: ${{ matrix.binary }}
-          DST: ${{ matrix.artifact }}
+      - name: Rename artifact
         run: cp "$SRC" "$DST"
-
-      - name: Rename artifact (Windows)
-        if: matrix.os == 'windows-latest'
         env:
           SRC: ${{ matrix.binary }}
           DST: ${{ matrix.artifact }}
-        run: copy "$env:SRC" "$env:DST"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
