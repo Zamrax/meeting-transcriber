@@ -1,8 +1,5 @@
 # Build and Release Folders
-bin-debug/
-bin-release/
-[Oo]bj/
-[Bb]in/
+target/
 
 # Other files and folders
 .settings/
@@ -12,6 +9,10 @@ bin-release/
 *.air
 *.ipa
 *.apk
+*.exe
+
+# In case of vibe coding
+CLAUDE.md
 
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
 # should NOT be excluded as they contain compiler settings and other important
