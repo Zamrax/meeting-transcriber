@@ -31,7 +31,7 @@ pub fn meeting_analysis_schema() -> Value {
             },
             "summary": {
                 "type": "string",
-                "description": "3-5 sentence executive summary of the meeting"
+                "description": "Detailed multi-paragraph executive summary (minimum 300 words). Paragraph 1: meeting purpose and context. Paragraph 2: key discussion points, arguments, and viewpoints from participants. Paragraph 3: decisions reached, outcomes, and next steps. Be thorough and specific — reference actual topics, names, and details from the conversation."
             },
             "responsibilities": {
                 "type": "object",
