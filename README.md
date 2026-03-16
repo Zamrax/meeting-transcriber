@@ -1,6 +1,6 @@
 # <img src="meeting-transcriber.ico" width="32" height="32" alt="icon"> Meeting Transcriber
 
-A cross-platform desktop application that **records**, **transcribes**, and **analyzes** meetings using Google Gemini AI.
+A cross-platform desktop application that **records**, **transcribes**, and **analyzes** meetings using Google Gemini AI. Built in Rust for small binaries and native performance.
 
 ---
 
@@ -10,50 +10,119 @@ A cross-platform desktop application that **records**, **transcribes**, and **an
 |---------|-------------|
 | 🎙️ **System + Mic Recording** | Captures both system audio (remote participants) and microphone (you) simultaneously |
 | ✨ **AI Transcription** | Full verbatim transcript with speaker labels via Gemini API |
-| 🧠 **Smart Analysis** | Executive summary, action items with deadlines, per-person responsibilities |
+| 🧠 **Smart Analysis** | Detailed multi-paragraph summary, action items with deadlines, per-person responsibilities |
 | 📄 **Markdown Export** | Download structured meeting notes as `.md` with YAML frontmatter |
 | 📓 **Obsidian Integration** | One-click save to your Obsidian vault under `Meeting Notes/` |
 | 📝 **Notion Integration** | Push meeting notes as a new Notion page with formatted blocks |
+| 📊 **Live Recording Feedback** | Real-time sample counter and silence detection during recording |
+| ⏱️ **Long Meeting Support** | Records up to 90 minutes; resumable upload for large files |
 | 🌙 **Dark Theme** | Polished dark UI built with egui |
-| 💻 **Cross-Platform** | Windows, macOS, and Linux from a single codebase |
+| 💻 **Cross-Platform** | Windows, macOS, and Linux from a single Rust codebase |
+
+---
+
+## 📋 Prerequisites
+
+### All Platforms
+
+- [Rust toolchain](https://rustup.rs/) (1.70+)
+- A [Gemini API key](https://aistudio.google.com/apikey) (free tier available)
+
+### Windows
+
+No additional dependencies. WASAPI is used for audio capture and is built into Windows.
+
+> **Note:** If building from source on Windows, the MSVC build tools are required (installed with Visual Studio or the [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)).
+
+### macOS
+
+**For system audio capture**, install [BlackHole](https://existential.audio/blackhole/):
+
+```bash
+brew install blackhole-2ch
+```
+
+Then configure a Multi-Output Device so audio flows to both your speakers and BlackHole:
+
+1. Open **Audio MIDI Setup** (Spotlight > "Audio MIDI Setup")
+2. Click the **+** button at the bottom-left and choose **Create Multi-Output Device**
+3. Check both your speakers/headphones **and** BlackHole 2ch
+4. Go to **System Settings > Sound > Output** and select the Multi-Output Device
+
+> Without this setup, BlackHole will be listed as a device but will capture silence.
+
+**Running the .app bundle:** The app is not signed with an Apple Developer certificate, so macOS will block it. To unblock, open Terminal and run:
+
+```bash
+xattr -cr /path/to/MeetingAssistant.app
+```
+
+> **Tip:** Type `xattr -cr ` (with a trailing space) then drag and drop the `.app` file from Finder into the Terminal window — it will fill in the path automatically.
+
+### Linux
+
+Install the ALSA development libraries (required to build `cpal`):
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install libasound2-dev
+
+# Fedora
+sudo dnf install alsa-lib-devel
+
+# Arch
+sudo pacman -S alsa-lib
+```
+
+If you want a GTK file dialog (for the save/export dialogs), also install:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install libgtk-3-dev
+```
+
+PulseAudio monitor sources are detected automatically for system audio capture.
+
+---
 
 ## 🚀 Quick Start
 
-### 1. Get a Gemini API Key
-
-Get a free API key from [Google AI Studio](https.aistudio.google.com/apikey).
-
-### 2. Build & Run
+### 1. Build & Run
 
 ```bash
-# Clone the repository
-git clone https://github.com/Zamrax/meeting-transcribe.git
+git clone https://github.com/Zamrax/meeting-transcriber.git
 cd meeting-transcriber
-
-# Run in debug mode
 cargo run
-
-# Or build a release binary
-cargo build --release
 ```
 
-### 3. Configure
+### 2. Configure
 
 Click **Settings** in the app and enter:
-- **API Key** — Your Gemini API key
-- **Model** — Choose from gemini-3.1-flash-lite-preview, gemini-2.5-flash, etc.
-- **Participants** — Optional comma-separated names for better speaker labeling
-- **Obsidian Vault Path** — For one-click Obsidian export
-- **Notion Token + Page ID** — For Notion integration
 
-### 4. Record
+| Setting | Required | Description |
+|---------|----------|-------------|
+| **Gemini API Key** | Yes | Get one free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **Model** | Yes | Default: `gemini-2.5-flash`. Also supports `gemini-2.5-pro`, `gemini-2.0-flash`, etc. |
+| **Participants** | No | Comma-separated names for better speaker labeling |
+| **Obsidian Vault Path** | No | Absolute path to your vault for one-click export |
+| **Notion Token + Page ID** | No | For Notion integration |
+
+Alternatively, create a `.env` file in the project root (see `.env.example`):
+
+```env
+GEMINI_API_KEY=your-key-here
+```
+
+### 3. Record
 
 1. Select **System + Mic** (default), **System Audio**, or **Microphone**
-2. Choose your audio devices
-3. Click **Start Recording**
+2. Choose your audio devices from the dropdowns
+3. Click **Start Recording** — the live sample counter confirms audio is flowing
 4. When done, click **Stop Recording** — analysis begins automatically
 5. Browse results in the **Summary**, **Action Items**, **Responsibilities**, and **Transcript** tabs
 6. Export via **Download .md**, **Save to Obsidian**, or **Push to Notion**
+
+---
 
 ## 🎤 Audio Modes
 
@@ -63,34 +132,38 @@ Click **Settings** in the app and enter:
 | **System Audio** | Only system/speaker output | Recording a presentation or webinar |
 | **Microphone** | Only microphone input | In-person meetings |
 
-## 💻 Platform Support
+## 💻 Platform Audio Support
 
-| Platform | Audio Backend | Loopback Method |
-|----------|--------------|-----------------|
-| **Windows** | WASAPI | Output device loopback capture |
-| **macOS (in progress)** | CoreAudio | BlackHole virtual audio device |
-| **Linux (in progress)** | PulseAudio / ALSA | PulseAudio monitor source |
+| Platform | Audio Backend | System Audio Method |
+|----------|--------------|---------------------|
+| **Windows** | WASAPI | Output device loopback capture (built-in) |
+| **macOS** | CoreAudio | [BlackHole](https://existential.audio/blackhole/) virtual audio device |
+| **Linux** | PulseAudio / ALSA | PulseAudio monitor source (auto-detected) |
 
-> **macOS note:** Install [BlackHole](https://existential.audio/blackhole/) for system audio capture.
->
-> **Linux note:** PulseAudio monitor sources are used automatically.
+---
 
 ## 📦 Building Release Binaries
 
 ```bash
-# Windows (from Linux cross-compile)
+# Windows (native MSVC)
+cargo build --release
+
+# Windows (cross-compile from Linux)
 cargo build --release --target=x86_64-pc-windows-gnu
 
-# macOS
-cargo build --release
+# macOS (Apple Silicon)
+cargo build --release --target=aarch64-apple-darwin
+
+# macOS (Intel)
+cargo build --release --target=x86_64-apple-darwin
 
 # Linux
 cargo build --release
 ```
 
-### Binary Size Optimization
+Release binaries are written to `target/release/` (or `target/<target>/release/` for cross-compilation).
 
-The release profile is configured for minimal binary size:
+The release profile is tuned for minimal binary size (~5-12 MB):
 
 ```toml
 [profile.release]
@@ -101,7 +174,7 @@ panic = "abort"     # No unwinding overhead
 strip = true        # Strip debug symbols
 ```
 
-Expected binary size: **5-12 MB** (vs 80-150 MB for the Python/PySide6 version).
+---
 
 ## ⚙️ Configuration
 
@@ -113,14 +186,7 @@ Settings are persisted to your OS config directory via [confy](https://crates.io
 | macOS | `~/Library/Application Support/meeting-transcriber/default-config.toml` |
 | Linux | `~/.config/meeting-transcriber/default-config.toml` |
 
-You can also use a `.env` file in the project root:
-
-```env
-GEMINI_API_KEY=your-key-here
-NOTION_TOKEN=your-notion-token
-NOTION_PARENT_PAGE_ID=your-page-id
-OBSIDIAN_VAULT_PATH=/path/to/vault
-```
+---
 
 ## 🛠️ Tech Stack
 
@@ -128,9 +194,9 @@ OBSIDIAN_VAULT_PATH=/path/to/vault
 |-----------|-------|---------|
 | 🎨 GUI | `eframe` / `egui` | Immediate-mode cross-platform UI |
 | 🔊 Audio | `cpal` | Cross-platform audio capture |
-| 🌐 HTTP | `reqwest` + `rustls` | Gemini & Notion API (no OpenSSL) |
+| 🌐 HTTP | `reqwest` + `rustls` | Gemini & Notion API (no OpenSSL dependency) |
 | 🔄 Serialization | `serde` / `serde_json` | JSON parsing and schema |
-| 🎵 WAV | `hound` | WAV file read/write |
+| 🎵 WAV | `hound` | WAV file encoding |
 | ⚙️ Config | `confy` | TOML-based persistent settings |
 | 📂 File dialogs | `rfd` | Native open/save dialogs |
 
@@ -140,13 +206,7 @@ OBSIDIAN_VAULT_PATH=/path/to/vault
 cargo test
 ```
 
-54 unit tests covering:
-- WAV assembly, stereo-to-mono, resampling, stream mixing
-- Schema serialization/deserialization
-- Markdown, Obsidian, and Notion export formats
-- Gemini client response parsing
-- Credential scrubbing
-- Config persistence
+Unit tests cover WAV assembly, stereo-to-mono conversion, resampling, stream mixing, schema serialization, all export formats, Gemini client response parsing, credential scrubbing, silence detection, and config persistence.
 
 ## 📄 License
 
