@@ -257,4 +257,128 @@ mod tests {
         assert_eq!(&wav[0..4], b"RIFF");
         assert!(wav.len() > 44);
     }
+
+    // --- BlackHole 16ch downmix tests ---
+
+    #[test]
+    fn test_stereo_to_mono_16_channels_produces_correct_sample_count() {
+        // BlackHole 16ch: 16 channels per frame, i16 samples
+        let channels: u16 = 16;
+        let num_frames = 100usize;
+        let frame_size = channels as usize * 2; // 2 bytes per i16
+        let mut data = vec![0u8; num_frames * frame_size];
+
+        // Fill each frame so that channel 0 = 1000, all others = 0.
+        // Expected mono average = 1000 / 16 = 62 (integer division in i32 then cast).
+        for f in 0..num_frames {
+            let offset = f * frame_size;
+            let sample: i16 = 1000;
+            data[offset..offset + 2].copy_from_slice(&sample.to_le_bytes());
+            // Remaining 15 channels stay 0 (already zeroed)
+        }
+
+        let result = stereo_to_mono(&data, channels);
+        // One mono sample per frame, 2 bytes each
+        assert_eq!(result.len(), num_frames * 2);
+    }
+
+    #[test]
+    fn test_stereo_to_mono_16_channels_averages_correctly() {
+        // Two frames, each with channel 0 = 1600 and all other 15 channels = 0.
+        // Average per frame = 1600 / 16 = 100.
+        let channels: u16 = 16;
+        let frame_size = channels as usize * 2;
+        let mut data = vec![0u8; 2 * frame_size];
+
+        for f in 0..2usize {
+            let offset = f * frame_size;
+            let sample: i16 = 1600;
+            data[offset..offset + 2].copy_from_slice(&sample.to_le_bytes());
+        }
+
+        let result = stereo_to_mono(&data, channels);
+        assert_eq!(result.len(), 4); // 2 mono frames * 2 bytes
+
+        let s0 = i16::from_le_bytes([result[0], result[1]]);
+        let s1 = i16::from_le_bytes([result[2], result[3]]);
+        assert_eq!(s0, 100);
+        assert_eq!(s1, 100);
+    }
+
+    #[test]
+    fn test_stereo_to_mono_16_channels_clamps_overflow() {
+        // All 16 channels = i16::MAX (32767). Sum = 16 * 32767, which overflows i16 but
+        // the implementation accumulates in i32 and divides before clamping.
+        // Average = 32767 (no clamping needed at this value, but verify no panic).
+        let channels: u16 = 16;
+        let frame_size = channels as usize * 2;
+        let mut data = vec![0u8; frame_size]; // 1 frame
+
+        for ch in 0..channels as usize {
+            let offset = ch * 2;
+            data[offset..offset + 2].copy_from_slice(&i16::MAX.to_le_bytes());
+        }
+
+        let result = stereo_to_mono(&data, channels);
+        assert_eq!(result.len(), 2);
+        let sample = i16::from_le_bytes([result[0], result[1]]);
+        assert_eq!(sample, i16::MAX);
+    }
+
+    // --- 48kHz 2ch (BlackHole-typical) resampling tests ---
+
+    #[test]
+    fn test_assemble_wav_48khz_2ch_produces_valid_wav() {
+        // Simulate one second of 48kHz stereo audio (BlackHole-typical capture rate).
+        // 48000 frames * 2 channels * 2 bytes = 192000 bytes raw PCM.
+        let sample_rate = 48000u32;
+        let channels = 2u16;
+        let num_frames = 4800usize; // 0.1 s — enough to verify without huge allocation
+        let mut chunk = Vec::with_capacity(num_frames * channels as usize * 2);
+        for i in 0..num_frames {
+            let sample = ((i % 200) as i16).saturating_sub(100); // -100..99 range
+            // Left channel
+            chunk.extend_from_slice(&sample.to_le_bytes());
+            // Right channel
+            chunk.extend_from_slice(&sample.to_le_bytes());
+        }
+
+        let wav = assemble_wav(&[chunk], sample_rate, channels);
+
+        // Must begin with a valid RIFF/WAVE header
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        // Must contain PCM samples beyond the header
+        assert!(wav.len() > 44, "WAV should contain audio data beyond the 44-byte header");
+    }
+
+    #[test]
+    fn test_resample_48khz_to_16khz_output_length() {
+        // 48000 Hz → 16000 Hz: ratio 3:1, so output should be ~1/3 of input samples.
+        let src_samples = 4800usize; // 0.1 s at 48kHz
+        let data: Vec<u8> = (0..src_samples)
+            .flat_map(|i| ((i % 1000) as i16).to_le_bytes())
+            .collect();
+
+        let result = resample(&data, 48000, 16000);
+        let out_samples = result.len() / 2;
+        // Allow ±5 samples tolerance for ceiling rounding in the implementation
+        assert!(
+            out_samples >= 1595 && out_samples <= 1605,
+            "Expected ~1600 output samples from 4800 input at 3:1 ratio, got {}",
+            out_samples
+        );
+    }
+
+    #[test]
+    fn test_resample_48khz_to_16khz_silent_stays_silent() {
+        // Silent 48kHz input must produce silent 16kHz output (all zeros).
+        let data = vec![0u8; 4800 * 2]; // 4800 silent mono samples
+        let result = resample(&data, 48000, 16000);
+        assert!(!result.is_empty());
+        assert!(
+            result.iter().all(|&b| b == 0),
+            "Resampling silence should produce all-zero output"
+        );
+    }
 }
