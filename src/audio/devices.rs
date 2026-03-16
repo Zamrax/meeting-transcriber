@@ -5,6 +5,9 @@ use cpal::traits::{DeviceTrait, HostTrait};
 pub struct AudioDevice {
     pub name: String,
     pub is_loopback: bool,
+    /// Whether this device is enumerated as an input device (true for macOS BlackHole, Linux monitors).
+    /// Windows WASAPI loopback devices are output devices (false).
+    pub is_input_device: bool,
     pub host_id: String,
 }
 
@@ -28,6 +31,7 @@ pub fn list_microphone_devices() -> Vec<(String, AudioDevice)> {
                                 AudioDevice {
                                     name: name.clone(),
                                     is_loopback: false,
+                                    is_input_device: true,
                                     host_id: host_id.name().to_string(),
                                 },
                             ));
@@ -56,6 +60,7 @@ pub fn list_microphone_devices() -> Vec<(String, AudioDevice)> {
                     AudioDevice {
                         name: name.clone(),
                         is_loopback: false,
+                        is_input_device: true,
                         host_id: "default".to_string(),
                     },
                 ));
@@ -87,6 +92,7 @@ pub fn list_loopback_devices() -> Vec<(String, AudioDevice)> {
                                 AudioDevice {
                                     name: name.clone(),
                                     is_loopback: true,
+                                    is_input_device: false,
                                     host_id: host_id.name().to_string(),
                                 },
                             ));
@@ -111,12 +117,19 @@ pub fn list_loopback_devices() -> Vec<(String, AudioDevice)> {
                             AudioDevice {
                                 name: name.clone(),
                                 is_loopback: true,
+                                is_input_device: true,
                                 host_id: "coreaudio".to_string(),
                             },
                         ));
                     }
                 }
             }
+        }
+        if devices.is_empty() {
+            log::warn!(
+                "No loopback devices found on macOS. Install BlackHole (https://existential.audio/blackhole/) \
+                 to capture system audio."
+            );
         }
         return devices;
     }
@@ -134,6 +147,7 @@ pub fn list_loopback_devices() -> Vec<(String, AudioDevice)> {
                             AudioDevice {
                                 name: name.clone(),
                                 is_loopback: true,
+                                is_input_device: true,
                                 host_id: "pulse".to_string(),
                             },
                         ));
