@@ -248,10 +248,6 @@ fn draw_action_items_table(ui: &mut egui::Ui, analysis: &MeetingAnalysis) {
         return;
     }
 
-    let available_width = ui.available_width();
-    // Reserve space for Owner (~100) + spacing (20) + Deadline (~80) + spacing (20)
-    let task_col_width = (available_width - 220.0).max(200.0);
-
     egui::Grid::new("action_items_grid")
         .striped(true)
         .min_col_width(80.0)
@@ -284,13 +280,9 @@ fn draw_action_items_table(ui: &mut egui::Ui, analysis: &MeetingAnalysis) {
                         .strong()
                         .color(AppColors::TEXT_PRIMARY),
                 );
-                // Wrap task text within the available column width
-                ui.allocate_ui(egui::vec2(task_col_width, 0.0), |ui| {
-                    ui.label(
-                        egui::RichText::new(&item.description)
-                            .color(AppColors::TEXT_PRIMARY),
-                    );
-                });
+                ui.label(
+                    egui::RichText::new(&item.description).color(AppColors::TEXT_PRIMARY),
+                );
                 let deadline_text = item.deadline.as_deref().unwrap_or("\u{2014}");
                 let deadline_color = if item.deadline.is_some() {
                     AppColors::AMBER
