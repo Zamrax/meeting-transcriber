@@ -64,7 +64,7 @@ impl MeetingTranscriberApp {
                     } else {
                         Some(participants.as_slice())
                     };
-                    client.analyze_audio(&wav_bytes, names)
+                    client.analyze_audio(wav_bytes, names)
                 }
                 Err(e) => Err(e),
             };
@@ -215,7 +215,7 @@ impl eframe::App for MeetingTranscriberApp {
                                 );
                                 ui.add_space(4.0);
                                 ui.label(
-                                    egui::RichText::new("This may take a minute for longer recordings.")
+                                    egui::RichText::new("This may take several minutes for longer recordings.")
                                         .color(AppColors::TEXT_MUTED)
                                         .size(12.0),
                                 );

@@ -26,8 +26,10 @@ impl GeminiClient {
         if api_key.is_empty() {
             return Err("Gemini API key is required".into());
         }
+        // 90-min recording = ~165 MB upload + Gemini transcription time.
+        // Upload at 5 Mbps ≈ 4.5 min, transcription can take several minutes more.
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(std::time::Duration::from_secs(900))
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
@@ -39,13 +41,14 @@ impl GeminiClient {
     }
 
     /// Transcribe and analyze a WAV audio recording.
+    /// Takes ownership of wav_bytes to avoid copying ~165 MB for 90-min recordings.
     pub fn analyze_audio(
         &self,
-        wav_bytes: &[u8],
+        wav_bytes: Vec<u8>,
         participant_names: Option<&[String]>,
     ) -> Result<MeetingAnalysis, String> {
         if wav_bytes.len() <= INLINE_THRESHOLD_BYTES {
-            self.analyze_inline(wav_bytes, participant_names)
+            self.analyze_inline(&wav_bytes, participant_names)
         } else {
             self.analyze_via_file_api(wav_bytes, participant_names)
         }
@@ -85,7 +88,7 @@ impl GeminiClient {
     /// Upload audio via Gemini File API then analyze (>= 15 MB).
     fn analyze_via_file_api(
         &self,
-        wav_bytes: &[u8],
+        wav_bytes: Vec<u8>,
         participant_names: Option<&[String]>,
     ) -> Result<MeetingAnalysis, String> {
         let (file_name, file_uri) = self.upload_file(wav_bytes)?;
@@ -181,27 +184,45 @@ impl GeminiClient {
         })
     }
 
-    fn upload_file(&self, wav_bytes: &[u8]) -> Result<(String, String), String> {
-        let form = reqwest::blocking::multipart::Form::new()
-            .text(
-                "metadata",
-                serde_json::json!({"file": {"display_name": "meeting_audio.wav"}}).to_string(),
-            )
-            .part(
-                "file",
-                reqwest::blocking::multipart::Part::bytes(wav_bytes.to_vec())
-                    .mime_str("audio/wav")
-                    .map_err(|e| format!("MIME error: {e}"))?,
-            );
+    fn upload_file(&self, wav_bytes: Vec<u8>) -> Result<(String, String), String> {
+        // Step 1: Initiate resumable upload
+        let metadata = serde_json::json!({"file": {"display_name": "meeting_audio.wav"}});
+        let initiate_resp = self.client
+            .post(UPLOAD_URL)
+            .header("x-goog-api-key", &self.api_key)
+            .header("X-Goog-Upload-Protocol", "resumable")
+            .header("X-Goog-Upload-Command", "start")
+            .header("X-Goog-Upload-Header-Content-Length", wav_bytes.len().to_string())
+            .header("X-Goog-Upload-Header-Content-Type", "audio/wav")
+            .header("Content-Type", "application/json")
+            .body(metadata.to_string())
+            .send()
+            .map_err(|e| format!("File upload initiation failed: {e}"))?;
 
-        let resp = self
-            .authenticated_post(UPLOAD_URL)
-            .multipart(form)
+        if !initiate_resp.status().is_success() {
+            let text = initiate_resp.text().unwrap_or_default();
+            return Err(format!("File upload initiation error: {text}"));
+        }
+
+        let upload_url = initiate_resp
+            .headers()
+            .get("x-goog-upload-url")
+            .and_then(|v| v.to_str().ok())
+            .ok_or("Missing upload URL in initiation response")?
+            .to_string();
+
+        // Step 2: Upload the actual file data
+        let upload_resp = self.client
+            .put(&upload_url)
+            .header("X-Goog-Upload-Command", "upload, finalize")
+            .header("X-Goog-Upload-Offset", "0")
+            .header("Content-Type", "audio/wav")
+            .body(wav_bytes)
             .send()
             .map_err(|e| format!("File upload failed: {e}"))?;
 
-        let status = resp.status();
-        let text = resp
+        let status = upload_resp.status();
+        let text = upload_resp
             .text()
             .map_err(|e| format!("Failed to read upload response: {e}"))?;
 
