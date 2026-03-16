@@ -1,6 +1,6 @@
 [package]
 name = "meeting-transcriber"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 license = "MIT"
 description = "Cross-platform meeting transcription and analysis tool"
