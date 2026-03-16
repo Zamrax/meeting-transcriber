@@ -27,7 +27,7 @@ Get a free API key from [Google AI Studio](https.aistudio.google.com/apikey).
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/Zamrax/meeting-transcribe.git
 cd meeting-transcriber
 
 # Run in debug mode
@@ -68,8 +68,8 @@ Click **Settings** in the app and enter:
 | Platform | Audio Backend | Loopback Method |
 |----------|--------------|-----------------|
 | **Windows** | WASAPI | Output device loopback capture |
-| **macOS** | CoreAudio | BlackHole virtual audio device |
-| **Linux** | PulseAudio / ALSA | PulseAudio monitor source |
+| **macOS (in progress)** | CoreAudio | BlackHole virtual audio device |
+| **Linux (in progress)** | PulseAudio / ALSA | PulseAudio monitor source |
 
 > **macOS note:** Install [BlackHole](https://existential.audio/blackhole/) for system audio capture.
 >
