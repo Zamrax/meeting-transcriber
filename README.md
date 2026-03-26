@@ -14,6 +14,7 @@ A cross-platform desktop application that **records**, **transcribes**, and **an
 | 📄 **Markdown Export** | Download structured meeting notes as `.md` with YAML frontmatter |
 | 📓 **Obsidian Integration** | One-click save to your Obsidian vault under `Meeting Notes/` |
 | 📝 **Notion Integration** | Push meeting notes as a new Notion page with formatted blocks |
+| 📤 **Upload WAV** | Re-analyze a previously saved recording when Gemini was unavailable |
 | 📊 **Live Recording Feedback** | Real-time sample counter and silence detection during recording |
 | ⏱️ **Long Meeting Support** | Records up to 90 minutes; resumable upload for large files |
 | 🌙 **Dark Theme** | Polished dark UI built with egui |
@@ -121,6 +122,8 @@ GEMINI_API_KEY=your-key-here
 4. When done, click **Stop Recording** — analysis begins automatically
 5. Browse results in the **Summary**, **Action Items**, **Responsibilities**, and **Transcript** tabs
 6. Export via **Download .md**, **Save to Obsidian**, or **Push to Notion**
+
+> **Tip:** If Gemini fails to analyze a recording (e.g., the model was overloaded), the WAV file is still saved. Click **Upload WAV** to re-submit it for analysis later.
 
 ---
 
