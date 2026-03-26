@@ -66,12 +66,15 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
         return;
     };
 
-    let analysis = analysis.clone();
+    // Borrow only the small fields needed outside the scroll area to avoid
+    // cloning the entire MeetingAnalysis (including transcript) every frame.
+    let title: &str = &analysis.meeting_title;
+    let date: &str = &analysis.meeting_date;
 
-    theme::section_frame(ui, &analysis.meeting_title, |ui| {
+    theme::section_frame(ui, &title, |ui| {
         // Date subtitle
         ui.label(
-            egui::RichText::new(&format!("Date: {}", analysis.meeting_date))
+            egui::RichText::new(&format!("Date: {date}"))
                 .color(AppColors::TEXT_SECONDARY)
                 .size(13.0),
         );
@@ -111,9 +114,13 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
             .corner_radius(egui::CornerRadius::same(8))
             .inner_margin(egui::Margin::same(14))
             .show(ui, |ui| {
+                // Re-borrow analysis inside the closure; safe because the outer
+                // guard at line 45 proved it is Some and nothing sets it to None mid-frame.
+                let Some(analysis) = state.analysis.as_ref() else { return; };
+                let active_tab = state.active_tab;
                 egui::ScrollArea::vertical()
                     .max_height(380.0)
-                    .show(ui, |ui| match state.active_tab {
+                    .show(ui, |ui| match active_tab {
                         ResultTab::Summary => {
                             ui.label(
                                 egui::RichText::new(&analysis.summary)
@@ -122,10 +129,10 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                             );
                         }
                         ResultTab::ActionItems => {
-                            draw_action_items_table(ui, &analysis);
+                            draw_action_items_table(ui, analysis);
                         }
                         ResultTab::Responsibilities => {
-                            draw_responsibilities(ui, &analysis);
+                            draw_responsibilities(ui, analysis);
                         }
                         ResultTab::Transcript => {
                             ui.label(
@@ -150,6 +157,7 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
             );
             ui.add_space(8.0);
 
+            // Clone analysis only on export click (user action), not every frame
             if ui
                 .add(
                     theme::primary_button("Download .md", AppColors::BLUE)
@@ -157,7 +165,9 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                 )
                 .clicked()
             {
-                export_markdown_dialog(state, &analysis);
+                if let Some(a) = &state.analysis {
+                    export_markdown_dialog(state, a);
+                }
             }
 
             let obs_enabled = !config.obsidian_vault_path.is_empty();
@@ -168,7 +178,9 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                 )
                 .clicked()
             {
-                export_obsidian(state, &analysis, &config.obsidian_vault_path);
+                if let Some(a) = &state.analysis {
+                    export_obsidian(state, a, &config.obsidian_vault_path);
+                }
             }
 
             #[cfg(feature = "notion")]
@@ -182,7 +194,9 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                     )
                     .clicked()
                 {
-                    export_notion(state, &analysis, config);
+                    if let Some(a) = &state.analysis {
+                        export_notion(state, a, config);
+                    }
                 }
             }
         });

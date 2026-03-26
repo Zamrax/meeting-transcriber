@@ -7,6 +7,12 @@ use crate::schema::MeetingAnalysis;
 use super::prompt::{build_analysis_prompt, SYSTEM_PROMPT};
 use super::schema_convert::meeting_analysis_schema;
 
+/// Log the full API error body and return a safe user-facing message.
+pub(crate) fn http_error(context: &str, status: reqwest::StatusCode, body: &str) -> String {
+    log::error!("{context} ({status}): {body}");
+    format!("{context}: HTTP {status}. Check logs for details.")
+}
+
 /// Threshold for inline base64 upload vs File API upload.
 const INLINE_THRESHOLD_BYTES: usize = 15 * 1024 * 1024;
 
@@ -156,7 +162,7 @@ impl GeminiClient {
             .map_err(|e| format!("Failed to read response body: {e}"))?;
 
         if !status.is_success() {
-            return Err(format!("Gemini API error ({status}): {text}"));
+            return Err(http_error("Gemini API error", status, &text));
         }
 
         serde_json::from_str(&text)
@@ -199,9 +205,10 @@ impl GeminiClient {
             .send()
             .map_err(|e| format!("File upload initiation failed: {e}"))?;
 
-        if !initiate_resp.status().is_success() {
+        let initiate_status = initiate_resp.status();
+        if !initiate_status.is_success() {
             let text = initiate_resp.text().unwrap_or_default();
-            return Err(format!("File upload initiation error: {text}"));
+            return Err(http_error("File upload initiation error", initiate_status, &text));
         }
 
         let upload_url = initiate_resp
@@ -227,7 +234,7 @@ impl GeminiClient {
             .map_err(|e| format!("Failed to read upload response: {e}"))?;
 
         if !status.is_success() {
-            return Err(format!("File upload error ({status}): {text}"));
+            return Err(http_error("File upload error", status, &text));
         }
 
         let json: Value = serde_json::from_str(&text)

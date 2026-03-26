@@ -188,20 +188,54 @@ impl RecorderState {
 
 /// Returns true when the WAV data appears silent (peak amplitude below threshold).
 ///
-/// Mirrors the inline silence check in `stop_recording()`:
-/// - Expects a standard 44-byte WAV header followed by i16 LE PCM samples.
-/// - Returns false (not silent) if there are no PCM samples after the header.
+/// Parses the RIFF structure to find the "data" sub-chunk rather than assuming
+/// a fixed 44-byte header, so uploaded WAV files with extended headers work correctly.
+/// Returns false (not silent) if no PCM samples are found.
 pub fn is_silent_wav(wav_bytes: &[u8]) -> bool {
-    if wav_bytes.len() <= 44 {
+    let pcm_start = find_wav_data_offset(wav_bytes).unwrap_or(0);
+    if pcm_start == 0 || pcm_start >= wav_bytes.len() {
         return false;
     }
-    let pcm_data = &wav_bytes[44..];
+    let pcm_data = &wav_bytes[pcm_start..];
     let peak = pcm_data
         .chunks_exact(2)
         .map(|pair| i16::from_le_bytes([pair[0], pair[1]]).unsigned_abs())
         .max()
         .unwrap_or(0);
     peak < 100
+}
+
+/// Search the RIFF structure for the "data" sub-chunk and return the byte offset
+/// where PCM sample data begins. Returns None if the WAV structure is invalid.
+fn find_wav_data_offset(wav_bytes: &[u8]) -> Option<usize> {
+    // Minimum: 12 bytes for RIFF header + 8 bytes for at least one sub-chunk
+    if wav_bytes.len() < 20 {
+        return None;
+    }
+    if &wav_bytes[0..4] != b"RIFF" || &wav_bytes[8..12] != b"WAVE" {
+        return None;
+    }
+    // Walk sub-chunks starting at byte 12
+    let mut pos = 12;
+    while pos + 8 <= wav_bytes.len() {
+        let chunk_id = &wav_bytes[pos..pos + 4];
+        let chunk_size = u32::from_le_bytes([
+            wav_bytes[pos + 4],
+            wav_bytes[pos + 5],
+            wav_bytes[pos + 6],
+            wav_bytes[pos + 7],
+        ]) as usize;
+        if chunk_id == b"data" {
+            return Some(pos + 8);
+        }
+        // Advance to next chunk (chunks are word-aligned)
+        let next_pos = pos + 8 + chunk_size + (chunk_size % 2) as usize;
+        if next_pos <= pos {
+            break; // no forward progress — malformed WAV
+        }
+        pos = next_pos;
+    }
+    None
 }
 
 /// Draw the recorder panel. Returns Some(wav_bytes) when recording completes.
@@ -357,7 +391,7 @@ pub fn draw_recorder_panel(ui: &mut egui::Ui, state: &mut RecorderState) -> Opti
                     };
                     ui.label(
                         egui::RichText::new(status)
-                            .color(if no_data { AppColors::RED } else { AppColors::RED })
+                            .color(if no_data { AppColors::RED } else { AppColors::TEXT_SECONDARY })
                             .size(13.0),
                     );
                 });
@@ -504,13 +538,26 @@ pub fn draw_recorder_panel(ui: &mut egui::Ui, state: &mut RecorderState) -> Opti
 mod tests {
     use super::*;
 
-    /// Build a minimal WAV-shaped byte buffer:
-    /// 44 bytes of fake header followed by the given PCM i16 samples (LE).
+    /// Build a minimal but valid RIFF/WAVE byte buffer with the given PCM i16 samples.
     fn make_wav_bytes(samples: &[i16]) -> Vec<u8> {
-        let mut buf = vec![0u8; 44]; // stub header — only length matters for the test
-        for s in samples {
-            buf.extend_from_slice(&s.to_le_bytes());
-        }
+        let pcm: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let data_len = pcm.len() as u32;
+        let file_size = 36 + data_len;
+        let mut buf = Vec::with_capacity(44 + pcm.len());
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&file_size.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+        buf.extend_from_slice(&1u16.to_le_bytes());  // PCM format
+        buf.extend_from_slice(&1u16.to_le_bytes());  // 1 channel
+        buf.extend_from_slice(&16000u32.to_le_bytes()); // sample rate
+        buf.extend_from_slice(&32000u32.to_le_bytes()); // byte rate
+        buf.extend_from_slice(&2u16.to_le_bytes());  // block align
+        buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_len.to_le_bytes());
+        buf.extend(pcm);
         buf
     }
 

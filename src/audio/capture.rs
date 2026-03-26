@@ -144,8 +144,10 @@ pub fn start_recording_dual(
             let lb_chunks: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
             let mic_chunks: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
 
-            let lb_sample_count = sample_count_clone.clone();
-            let mic_sample_count = sample_count_clone;
+            // Use separate counters so we don't double-count; only the loopback
+            // counter feeds the UI display via the shared Arc.
+            let lb_sample_count = sample_count_clone;
+            let mic_sample_count = Arc::new(AtomicU64::new(0));
             let lb_stream = build_input_stream(
                 &lb_device,
                 &lb_stream_config,
@@ -369,6 +371,6 @@ fn get_device_config(
                 return Ok(config);
             }
         }
-        Err(format!("No supported input config for device"))
+        Err(format!("No supported input config for device '{}'", device.name().unwrap_or_default()))
     }
 }

@@ -252,15 +252,17 @@ impl eframe::App for MeetingTranscriberApp {
 fn scrub_credentials(message: &str) -> String {
     let mut result = message.to_string();
     for pattern in CREDENTIAL_PATTERNS {
-        while let Some(pos) = result.find(pattern) {
+        // Build a new string each pass to avoid index-shift issues with replace_range
+        loop {
+            let Some(pos) = result.find(pattern) else {
+                break;
+            };
             let start = pos + pattern.len();
-            if let Some(end) = result[start..]
+            let end = result[start..]
                 .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '&')
-            {
-                result.replace_range(start..start + end, "***");
-            } else {
-                result.replace_range(start.., "***");
-            }
+                .map(|i| start + i)
+                .unwrap_or(result.len());
+            result = format!("{}{}***{}", &result[..pos], pattern, &result[end..]);
         }
     }
     result

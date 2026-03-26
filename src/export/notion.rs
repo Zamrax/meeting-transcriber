@@ -24,7 +24,10 @@ pub fn export_to_notion(
         return Err("Notion parent page ID is required".into());
     }
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
     let children = build_children(analysis);
 
     let body = serde_json::json!({
@@ -58,7 +61,7 @@ pub fn export_to_notion(
         .map_err(|e| format!("Failed to read Notion response: {e}"))?;
 
     if !status.is_success() {
-        return Err(format!("Notion API error ({status}): {text}"));
+        return Err(crate::gemini::client::http_error("Notion API error", status, &text));
     }
 
     let json: Value =
@@ -118,21 +121,30 @@ fn build_children(analysis: &MeetingAnalysis) -> Vec<Value> {
     children
 }
 
+/// Find the largest byte offset <= `max_bytes` that falls on a UTF-8 char boundary.
+fn safe_chunk_end(s: &str, max_bytes: usize) -> usize {
+    if s.len() <= max_bytes {
+        return s.len();
+    }
+    // Try to break at a newline within the safe range
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    if let Some(nl) = s[..end].rfind('\n') {
+        nl + 1
+    } else {
+        end
+    }
+}
+
 /// Split text into paragraph blocks respecting Notion's character limit.
 fn text_blocks(text: &str) -> Vec<Value> {
     let mut blocks = Vec::new();
     let mut remaining = text;
 
     while !remaining.is_empty() {
-        let chunk_end = if remaining.len() <= CHUNK_SIZE {
-            remaining.len()
-        } else {
-            // Try to break at a newline within the chunk
-            remaining[..CHUNK_SIZE]
-                .rfind('\n')
-                .map(|i| i + 1)
-                .unwrap_or(CHUNK_SIZE)
-        };
+        let chunk_end = safe_chunk_end(remaining, CHUNK_SIZE);
 
         let chunk = &remaining[..chunk_end];
         remaining = &remaining[chunk_end..];
