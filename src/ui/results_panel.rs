@@ -42,7 +42,7 @@ impl ResultsState {
 
 /// Draw the results panel.
 pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &Config) {
-    let Some(analysis) = &state.analysis else {
+    if state.analysis.is_none() {
         // Empty state
         theme::section_frame(ui, "Results", |ui| {
             ui.add_space(20.0);
@@ -64,12 +64,12 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
             ui.add_space(20.0);
         });
         return;
-    };
+    }
 
-    // Borrow only the small fields needed outside the scroll area to avoid
-    // cloning the entire MeetingAnalysis (including transcript) every frame.
-    let title: &str = &analysis.meeting_title;
-    let date: &str = &analysis.meeting_date;
+    // Clone only the small header strings so we don't hold a borrow on state
+    // across the closure that needs &mut state for export buttons.
+    let title = state.analysis.as_ref().unwrap().meeting_title.clone();
+    let date = state.analysis.as_ref().unwrap().meeting_date.clone();
 
     theme::section_frame(ui, &title, |ui| {
         // Date subtitle
@@ -165,8 +165,8 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                 )
                 .clicked()
             {
-                if let Some(a) = &state.analysis {
-                    export_markdown_dialog(state, a);
+                if let Some(a) = state.analysis.clone() {
+                    export_markdown_dialog(state, &a);
                 }
             }
 
@@ -178,8 +178,8 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                 )
                 .clicked()
             {
-                if let Some(a) = &state.analysis {
-                    export_obsidian(state, a, &config.obsidian_vault_path);
+                if let Some(a) = state.analysis.clone() {
+                    export_obsidian(state, &a, &config.obsidian_vault_path);
                 }
             }
 
@@ -194,8 +194,8 @@ pub fn draw_results_panel(ui: &mut egui::Ui, state: &mut ResultsState, config: &
                     )
                     .clicked()
                 {
-                    if let Some(a) = &state.analysis {
-                        export_notion(state, a, config);
+                    if let Some(a) = state.analysis.clone() {
+                        export_notion(state, &a, config);
                     }
                 }
             }
