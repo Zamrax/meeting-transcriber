@@ -403,6 +403,34 @@ pub fn draw_recorder_panel(ui: &mut egui::Ui, state: &mut RecorderState) -> Opti
 
                 ui.add_space(6.0);
 
+                // Upload WAV button — re-analyze a previously saved recording
+                let upload_btn = theme::secondary_button("Upload WAV");
+                if ui.add_enabled(btn_enabled, upload_btn).clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("WAV Audio", &["wav"])
+                        .pick_file()
+                    {
+                        match std::fs::read(&path) {
+                            Ok(bytes) => {
+                                state.last_wav_bytes = bytes.clone();
+                                state.error_text.clear();
+                                state.status_text = format!(
+                                    "Uploaded {} — analyzing...",
+                                    path.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("file"),
+                                );
+                                wav_result = Some(bytes);
+                            }
+                            Err(e) => {
+                                state.error_text = format!("Failed to read WAV file: {e}");
+                            }
+                        }
+                    }
+                }
+
+                ui.add_space(6.0);
+
                 // Status line
                 ui.label(
                     egui::RichText::new(&state.status_text)
