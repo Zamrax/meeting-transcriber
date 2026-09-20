@@ -300,14 +300,14 @@ pub fn draw_recorder_panel(ui: &mut egui::Ui, state: &mut RecorderState) -> Opti
                     let selected_name = state
                         .devices
                         .get(state.selected_device)
-                        .map(|d| d.name.as_str())
+                        .map(|d| d.display_name.as_str())
                         .unwrap_or("No devices found");
                     egui::ComboBox::from_id_salt("device_select")
                         .selected_text(selected_name)
                         .width(ui.available_width() - 20.0)
                         .show_ui(ui, |ui| {
                             for (idx, dev) in state.devices.iter().enumerate() {
-                                ui.selectable_value(&mut state.selected_device, idx, &dev.name);
+                                ui.selectable_value(&mut state.selected_device, idx, &dev.display_name);
                             }
                         });
                 });
@@ -327,14 +327,14 @@ pub fn draw_recorder_panel(ui: &mut egui::Ui, state: &mut RecorderState) -> Opti
                         let selected_mic = state
                             .mic_devices
                             .get(state.selected_mic)
-                            .map(|d| d.name.as_str())
+                            .map(|d| d.display_name.as_str())
                             .unwrap_or("No microphones found");
                         egui::ComboBox::from_id_salt("mic_select")
                             .selected_text(selected_mic)
                             .width(ui.available_width() - 20.0)
                             .show_ui(ui, |ui| {
                                 for (idx, dev) in state.mic_devices.iter().enumerate() {
-                                    ui.selectable_value(&mut state.selected_mic, idx, &dev.name);
+                                    ui.selectable_value(&mut state.selected_mic, idx, &dev.display_name);
                                 }
                             });
                     });

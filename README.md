@@ -28,6 +28,7 @@ A cross-platform desktop application that **records**, **transcribes**, and **an
 
 - [Rust toolchain](https://rustup.rs/) (1.70+)
 - An [OpenRouter API key](https://openrouter.ai/keys)
+- On Linux: PipeWire or PulseAudio with `pactl` and `parec` available (package `pipewire-pulse` or `pulseaudio-utils`), which system audio capture goes through
 
 ### Windows
 

@@ -3,7 +3,10 @@ use cpal::traits::{DeviceTrait, HostTrait};
 /// A discovered audio device with its index info.
 #[derive(Debug, Clone)]
 pub struct AudioDevice {
+    /// Identifier passed to the capture backend.
     pub name: String,
+    /// Human-readable label for the UI. Falls back to `name`.
+    pub display_name: String,
     pub is_loopback: bool,
     /// Whether this device is enumerated as an input device (true for macOS BlackHole, Linux monitors).
     /// Windows WASAPI loopback devices are output devices (false).
@@ -30,6 +33,7 @@ pub fn list_microphone_devices() -> Vec<(String, AudioDevice)> {
                                 name.clone(),
                                 AudioDevice {
                                     name: name.clone(),
+                                    display_name: name.clone(),
                                     is_loopback: false,
                                     is_input_device: true,
                                     host_id: host_id.name().to_string(),
@@ -45,7 +49,17 @@ pub fn list_microphone_devices() -> Vec<(String, AudioDevice)> {
         }
     }
 
-    // Default host fallback (macOS CoreAudio, Linux ALSA/PulseAudio)
+    #[cfg(target_os = "linux")]
+    {
+        // ALSA lists PCM aliases ("pulse", "front:CARD=Gam,DEV=0"), not real
+        // microphones, so prefer the sound server's own list.
+        let sources = pulse_devices(false);
+        if !sources.is_empty() {
+            return sources;
+        }
+    }
+
+    // Default host fallback (macOS CoreAudio, Linux ALSA without a sound server)
     let host = cpal::default_host();
     if let Ok(input_devices) = host.input_devices() {
         for device in input_devices {
@@ -59,6 +73,7 @@ pub fn list_microphone_devices() -> Vec<(String, AudioDevice)> {
                     name.clone(),
                     AudioDevice {
                         name: name.clone(),
+                        display_name: name.clone(),
                         is_loopback: false,
                         is_input_device: true,
                         host_id: "default".to_string(),
@@ -91,6 +106,7 @@ pub fn list_loopback_devices() -> Vec<(String, AudioDevice)> {
                                 name.clone(),
                                 AudioDevice {
                                     name: name.clone(),
+                                    display_name: name.clone(),
                                     is_loopback: true,
                                     is_input_device: false,
                                     host_id: host_id.name().to_string(),
@@ -116,6 +132,7 @@ pub fn list_loopback_devices() -> Vec<(String, AudioDevice)> {
                             name.clone(),
                             AudioDevice {
                                 name: name.clone(),
+                                display_name: name.clone(),
                                 is_loopback: true,
                                 is_input_device: true,
                                 host_id: "coreaudio".to_string(),
@@ -136,30 +153,56 @@ pub fn list_loopback_devices() -> Vec<(String, AudioDevice)> {
 
     #[cfg(target_os = "linux")]
     {
-        let host = cpal::default_host();
-        if let Ok(input_devices) = host.input_devices() {
-            for device in input_devices {
-                if let Ok(name) = device.name() {
-                    let name_lower = name.to_lowercase();
-                    if name_lower.contains("monitor") {
-                        devices.push((
-                            name.clone(),
-                            AudioDevice {
-                                name: name.clone(),
-                                is_loopback: true,
-                                is_input_device: true,
-                                host_id: "pulse".to_string(),
-                            },
-                        ));
-                    }
-                }
-            }
+        // Monitor sources are invisible to ALSA, so system audio has to come
+        // from the sound server.
+        devices = pulse_devices(true);
+        if devices.is_empty() {
+            log::warn!(
+                "No system-audio sources found. This needs PulseAudio or PipeWire with \
+                 pactl and parec installed (package: pulseaudio-utils or pipewire-pulse)."
+            );
         }
         return devices;
     }
 
     #[allow(unreachable_code)]
     devices
+}
+
+/// List sound-server sources as devices: monitors for system audio, the rest
+/// as microphones.
+#[cfg(target_os = "linux")]
+fn pulse_devices(monitors: bool) -> Vec<(String, AudioDevice)> {
+    use super::pulse;
+
+    if !pulse::is_available() {
+        return Vec::new();
+    }
+
+    let sources = match pulse::list_sources() {
+        Ok(sources) => sources,
+        Err(e) => {
+            log::warn!("Failed to list audio sources: {e}");
+            return Vec::new();
+        }
+    };
+
+    sources
+        .into_iter()
+        .filter(|source| source.is_monitor == monitors)
+        .map(|source| {
+            (
+                source.description.clone(),
+                AudioDevice {
+                    name: source.name,
+                    display_name: source.description,
+                    is_loopback: monitors,
+                    is_input_device: true,
+                    host_id: "pulse".to_string(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// Get the current platform display name.
@@ -169,7 +212,13 @@ pub fn platform_display_name() -> &'static str {
     #[cfg(target_os = "macos")]
     return "macOS (CoreAudio)";
     #[cfg(target_os = "linux")]
-    return "Linux (PulseAudio/ALSA)";
+    {
+        #[cfg(target_os = "linux")]
+        if super::pulse::is_available() {
+            return "Linux (PipeWire/PulseAudio)";
+        }
+        return "Linux (ALSA)";
+    }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     return "Unknown Platform";
 }

@@ -38,6 +38,11 @@ pub fn start_recording(
     let sample_count = Arc::new(AtomicU64::new(0));
     let sample_count_clone = sample_count.clone();
 
+    #[cfg(target_os = "linux")]
+    if is_pulse_source(&device_name) {
+        return start_recording_pulse(&device_name, sample_count);
+    }
+
     std::thread::spawn(move || {
         let run = || -> Result<(), String> {
             let device = find_device(&device_name, is_loopback, is_input_device)?;
@@ -113,6 +118,11 @@ pub fn start_recording_dual(
     let mic_name = mic_name.to_string();
     let sample_count = Arc::new(AtomicU64::new(0));
     let sample_count_clone = sample_count.clone();
+
+    #[cfg(target_os = "linux")]
+    if is_pulse_source(&loopback_name) && is_pulse_source(&mic_name) {
+        return start_recording_dual_pulse(&loopback_name, &mic_name, sample_count);
+    }
 
     std::thread::spawn(move || {
         let run = || -> Result<(), String> {
@@ -212,6 +222,102 @@ pub fn start_recording_dual(
         Ok(()) => Ok(RecordingHandle { stop_tx, result_rx, sample_count }),
         Err(e) => Err(e),
     }
+}
+
+/// Whether this name refers to a sound-server source rather than an ALSA PCM.
+#[cfg(target_os = "linux")]
+fn is_pulse_source(name: &str) -> bool {
+    use super::pulse;
+
+    pulse::is_available()
+        && pulse::list_sources()
+            .map(|sources| sources.iter().any(|source| source.name == name))
+            .unwrap_or(false)
+}
+
+/// Record one sound-server source through `parec`.
+///
+/// parec already delivers 16 kHz mono PCM, so there is nothing to downmix or
+/// resample — the bytes only need a WAV header.
+#[cfg(target_os = "linux")]
+fn start_recording_pulse(
+    source: &str,
+    sample_count: Arc<AtomicU64>,
+) -> Result<RecordingHandle, String> {
+    use super::pulse::PulseRecorder;
+
+    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+    let (result_tx, result_rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+
+    let recorder = PulseRecorder::start(source, sample_count.clone())?;
+    let source = source.to_string();
+
+    std::thread::spawn(move || {
+        let _ = stop_rx.recv();
+        let result = recorder.stop().map(|pcm| {
+            log::info!("Recording ended for '{}': {} samples", source, pcm.len() / 2);
+            super::wav::write_wav_public(&pcm, super::TARGET_SAMPLE_RATE, 1)
+        });
+        let _ = result_tx.send(result);
+    });
+
+    Ok(RecordingHandle {
+        stop_tx,
+        result_rx,
+        sample_count,
+    })
+}
+
+/// Record system audio and a microphone together, mixed to one mono track.
+#[cfg(target_os = "linux")]
+fn start_recording_dual_pulse(
+    loopback_source: &str,
+    mic_source: &str,
+    sample_count: Arc<AtomicU64>,
+) -> Result<RecordingHandle, String> {
+    use super::pulse::PulseRecorder;
+
+    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+    let (result_tx, result_rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+
+    // Only the loopback counter feeds the UI, so the two are not double-counted.
+    let loopback = PulseRecorder::start(loopback_source, sample_count.clone())?;
+    let mic = match PulseRecorder::start(mic_source, Arc::new(AtomicU64::new(0))) {
+        Ok(mic) => mic,
+        Err(e) => {
+            // Don't leave the first capture running if the second fails.
+            let _ = loopback.stop();
+            return Err(e);
+        }
+    };
+
+    std::thread::spawn(move || {
+        let _ = stop_rx.recv();
+
+        let result = (|| {
+            let loopback_pcm = loopback.stop()?;
+            let mic_pcm = mic.stop()?;
+            log::info!(
+                "Dual recording ended - system: {} samples, mic: {} samples",
+                loopback_pcm.len() / 2,
+                mic_pcm.len() / 2
+            );
+            let mixed = mix_mono_streams(&loopback_pcm, &mic_pcm);
+            Ok(super::wav::write_wav_public(
+                &mixed,
+                super::TARGET_SAMPLE_RATE,
+                1,
+            ))
+        })();
+
+        let _ = result_tx.send(result);
+    });
+
+    Ok(RecordingHandle {
+        stop_tx,
+        result_rx,
+        sample_count,
+    })
 }
 
 /// Assemble raw chunks to 16kHz mono PCM bytes (no WAV header).
