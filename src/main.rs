@@ -4,7 +4,7 @@
 mod audio;
 mod config;
 mod export;
-mod gemini;
+mod openrouter;
 mod schema;
 mod ui;
 

@@ -61,7 +61,7 @@ pub fn export_to_notion(
         .map_err(|e| format!("Failed to read Notion response: {e}"))?;
 
     if !status.is_success() {
-        return Err(crate::gemini::client::http_error("Notion API error", status, &text));
+        return Err(crate::openrouter::client::http_error("Notion API error", status, &text));
     }
 
     let json: Value =

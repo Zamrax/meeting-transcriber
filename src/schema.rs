@@ -10,7 +10,7 @@ pub struct ActionItem {
     pub deadline: Option<String>,
 }
 
-/// Complete structured output from a single Gemini transcription + analysis call.
+/// Complete structured output from a single transcription + analysis call.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MeetingAnalysis {
     pub meeting_title: String,
@@ -21,8 +21,50 @@ pub struct MeetingAnalysis {
     pub action_items: Vec<ActionItem>,
 }
 
+/// Analysis of a meeting whose transcript is assembled locally.
+///
+/// Long recordings are transcribed chunk by chunk and the parts are joined by
+/// the caller, so the final analysis pass is asked for everything but the
+/// transcript.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeetingSummary {
+    pub meeting_title: String,
+    pub meeting_date: String,
+    pub summary: String,
+    pub responsibilities: HashMap<String, Vec<String>>,
+    pub action_items: Vec<ActionItem>,
+}
+
+impl MeetingSummary {
+    /// Combine this analysis with the transcript collected from the chunks.
+    pub fn into_analysis(self, transcript: String) -> MeetingAnalysis {
+        MeetingAnalysis {
+            meeting_title: self.meeting_title,
+            meeting_date: self.meeting_date,
+            transcript,
+            summary: self.summary,
+            responsibilities: self.responsibilities,
+            action_items: self.action_items,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_summary_into_analysis_keeps_transcript() {
+        let summary = super::MeetingSummary {
+            meeting_title: "Sync".into(),
+            meeting_date: "2026-03-15".into(),
+            summary: "Talked".into(),
+            responsibilities: super::HashMap::new(),
+            action_items: vec![],
+        };
+        let analysis = summary.into_analysis("Speaker 1: Hi".into());
+        assert_eq!(analysis.transcript, "Speaker 1: Hi");
+        assert_eq!(analysis.meeting_title, "Sync");
+    }
+
     use super::*;
 
     #[test]

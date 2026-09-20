@@ -93,6 +93,105 @@ pub fn assemble_wav(chunks: &[Vec<u8>], sample_rate: u32, channels: u16) -> Vec<
     write_wav(&resampled, TARGET_SAMPLE_RATE, 1)
 }
 
+/// Decode any WAV file into 16 kHz mono `i16` samples.
+///
+/// Recorded audio is already 16 kHz mono, but an uploaded WAV can carry any
+/// sample rate, channel count, or sample format, so everything is normalised
+/// here before encoding for upload.
+pub fn decode_to_mono_16k(wav_bytes: &[u8]) -> Result<Vec<i16>, String> {
+    let reader = hound::WavReader::new(Cursor::new(wav_bytes))
+        .map_err(|e| format!("Not a readable WAV file: {e}"))?;
+    let spec = reader.spec();
+
+    // Reuse the buffer whenever a step is a no-op: a 90-minute recording is
+    // ~173 MB of samples, and it already arrives as 16 kHz mono.
+    let interleaved = read_samples_as_i16(reader, spec)?;
+    let mono = if spec.channels <= 1 {
+        interleaved
+    } else {
+        downmix_to_mono(&interleaved, spec.channels)
+    };
+    if spec.sample_rate == TARGET_SAMPLE_RATE {
+        return Ok(mono);
+    }
+    Ok(resample_samples(&mono, spec.sample_rate, TARGET_SAMPLE_RATE))
+}
+
+/// Read every sample as `i16`, scaling from the file's native format.
+fn read_samples_as_i16(
+    reader: hound::WavReader<Cursor<&[u8]>>,
+    spec: hound::WavSpec,
+) -> Result<Vec<i16>, String> {
+    let read_err = |e: hound::Error| format!("Failed to read WAV samples: {e}");
+
+    match (spec.sample_format, spec.bits_per_sample) {
+        (hound::SampleFormat::Int, 8) => reader
+            .into_samples::<i8>()
+            .map(|s| s.map(|v| (v as i16) << 8))
+            .collect::<Result<_, _>>()
+            .map_err(read_err),
+        (hound::SampleFormat::Int, 16) => reader
+            .into_samples::<i16>()
+            .collect::<Result<_, _>>()
+            .map_err(read_err),
+        (hound::SampleFormat::Int, bits @ (24 | 32)) => {
+            let shift = bits - 16;
+            reader
+                .into_samples::<i32>()
+                .map(|s| s.map(|v| (v >> shift) as i16))
+                .collect::<Result<_, _>>()
+                .map_err(read_err)
+        }
+        (hound::SampleFormat::Float, _) => reader
+            .into_samples::<f32>()
+            .map(|s| {
+                s.map(|v| (v.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16)
+            })
+            .collect::<Result<_, _>>()
+            .map_err(read_err),
+        (_, bits) => Err(format!("Unsupported WAV sample width: {bits} bits")),
+    }
+}
+
+/// Average interleaved channels down to mono.
+pub fn downmix_to_mono(samples: &[i16], channels: u16) -> Vec<i16> {
+    if channels <= 1 {
+        return samples.to_vec();
+    }
+    let channels = channels as usize;
+    samples
+        .chunks_exact(channels)
+        .map(|frame| {
+            let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+            (sum / channels as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16
+        })
+        .collect()
+}
+
+/// Resample mono samples with linear interpolation.
+pub fn resample_samples(samples: &[i16], src_rate: u32, dst_rate: u32) -> Vec<i16> {
+    if src_rate == dst_rate || samples.is_empty() {
+        return samples.to_vec();
+    }
+
+    let ratio = src_rate as f64 / dst_rate as f64;
+    let out_len = ((samples.len() as f64) / ratio).ceil() as usize;
+    let last = samples.len() - 1;
+
+    (0..out_len)
+        .map(|i| {
+            let src_pos = i as f64 * ratio;
+            let idx = src_pos as usize;
+            let frac = src_pos - idx as f64;
+            let s0 = samples[idx.min(last)] as f64;
+            let s1 = samples[(idx + 1).min(last)] as f64;
+            (s0 + frac * (s1 - s0))
+                .round()
+                .clamp(i16::MIN as f64, i16::MAX as f64) as i16
+        })
+        .collect()
+}
+
 /// Mix two mono 16kHz PCM streams (i16 LE bytes) by summing and clamping.
 /// If one stream is shorter, the longer stream plays solo for the remainder.
 pub fn mix_mono_streams(a: &[u8], b: &[u8]) -> Vec<u8> {
@@ -169,6 +268,62 @@ fn write_wav_inner(pcm_data: &[u8], sample_rate: u32, channels: u16) -> Result<V
 
 #[cfg(test)]
 mod tests {
+    use super::{decode_to_mono_16k, downmix_to_mono, resample_samples};
+
+    #[test]
+    fn test_downmix_stereo_samples() {
+        let stereo = [100i16, 200, -100, -200];
+        assert_eq!(downmix_to_mono(&stereo, 2), vec![150, -150]);
+    }
+
+    #[test]
+    fn test_downmix_mono_is_identity() {
+        let mono = [1i16, 2, 3];
+        assert_eq!(downmix_to_mono(&mono, 1), mono.to_vec());
+    }
+
+    #[test]
+    fn test_resample_samples_halves_length() {
+        let samples: Vec<i16> = (0..100).collect();
+        let out = resample_samples(&samples, 32_000, 16_000);
+        assert_eq!(out.len(), 50);
+    }
+
+    #[test]
+    fn test_resample_samples_same_rate_is_identity() {
+        let samples: Vec<i16> = vec![5, 6, 7];
+        assert_eq!(resample_samples(&samples, 16_000, 16_000), samples);
+    }
+
+    #[test]
+    fn test_decode_stereo_44k_to_mono_16k() {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 44_100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut writer = hound::WavWriter::new(&mut buf, spec).unwrap();
+            for _ in 0..44_100 {
+                writer.write_sample(1000i16).unwrap();
+                writer.write_sample(2000i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        let samples = decode_to_mono_16k(&buf.into_inner()).unwrap();
+        // One second of 44.1 kHz stereo becomes one second of 16 kHz mono.
+        assert!((samples.len() as i64 - 16_000).abs() <= 1);
+        assert_eq!(samples[100], 1500);
+    }
+
+    #[test]
+    fn test_decode_rejects_non_wav() {
+        assert!(decode_to_mono_16k(b"not a wav file at all").is_err());
+    }
+
     use super::*;
 
     #[test]

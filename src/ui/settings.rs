@@ -1,20 +1,44 @@
 use crate::config::Config;
+use crate::openrouter::catalog::{self, Catalog, ModelInfo};
 
 use super::theme::AppColors;
 
-pub const MODELS: &[&str] = &[
-    "gemini-3.1-flash-lite-preview",
-    "gemini-flash-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-];
+/// Which of the two model pickers a row belongs to.
+#[derive(Copy, Clone, PartialEq)]
+enum Role {
+    Transcription,
+    Analysis,
+}
+
+impl Role {
+    /// Cost estimate for this role, since the two phases bill differently:
+    /// transcription pays for audio tokens, analysis for transcript tokens.
+    fn cost_per_hour(self, model: &ModelInfo) -> Option<f64> {
+        match self {
+            Role::Transcription => model.transcription_cost_per_hour(),
+            Role::Analysis => model.analysis_cost_per_hour(),
+        }
+    }
+}
+
+/// Combined estimate for an hour of audio, when both models are priced.
+fn total_cost_per_hour(
+    transcription_model: &str,
+    analysis_model: &str,
+    catalog: &Catalog,
+) -> Option<f64> {
+    let find = |id: &str| catalog.models.iter().find(|m| m.id == id);
+    let transcription = find(transcription_model)?.transcription_cost_per_hour()?;
+    let analysis = find(analysis_model)?.analysis_cost_per_hour()?;
+    Some(transcription + analysis)
+}
 
 pub struct SettingsState {
     pub open: bool,
     pub api_key: String,
-    pub model: String,
+    pub transcription_model: String,
+    pub analysis_model: String,
+    pub diarization: bool,
     pub participants: String,
     pub obsidian_vault_path: String,
     pub notion_token: String,
@@ -25,8 +49,10 @@ impl SettingsState {
     pub fn from_config(config: &Config) -> Self {
         Self {
             open: false,
-            api_key: config.gemini_api_key.clone(),
-            model: config.gemini_model.clone(),
+            api_key: config.openrouter_api_key.clone(),
+            transcription_model: config.transcription_model.clone(),
+            analysis_model: config.analysis_model.clone(),
+            diarization: config.diarization,
             participants: config.participants.clone(),
             obsidian_vault_path: config.obsidian_vault_path.clone(),
             notion_token: config.notion_token.clone(),
@@ -35,8 +61,10 @@ impl SettingsState {
     }
 
     pub fn apply_to_config(&self, config: &mut Config) {
-        config.gemini_api_key = self.api_key.clone();
-        config.gemini_model = self.model.clone();
+        config.openrouter_api_key = self.api_key.clone();
+        config.transcription_model = self.transcription_model.trim().to_string();
+        config.analysis_model = self.analysis_model.trim().to_string();
+        config.diarization = self.diarization;
         config.participants = self.participants.clone();
         config.obsidian_vault_path = self.obsidian_vault_path.clone();
         config.notion_token = self.notion_token.clone();
@@ -45,7 +73,11 @@ impl SettingsState {
 }
 
 /// Draw the settings dialog. Returns Some(true) if saved, Some(false) if cancelled.
-pub fn draw_settings(ctx: &egui::Context, state: &mut SettingsState) -> Option<bool> {
+pub fn draw_settings(
+    ctx: &egui::Context,
+    state: &mut SettingsState,
+    catalog: &Catalog,
+) -> Option<bool> {
     let mut result = None;
 
     egui::Window::new("Settings")
@@ -61,9 +93,9 @@ pub fn draw_settings(ctx: &egui::Context, state: &mut SettingsState) -> Option<b
             // Fixed field width: window(520) - window_margin(2*16) - frame_margin(2*12) - label - grid_spacing
             let field_width = 520.0 - 32.0 - 24.0 - label_width - 10.0;
 
-            // Gemini API
-            settings_section(ui, "Gemini API", |ui| {
-                egui::Grid::new("settings_gemini")
+            // OpenRouter API
+            settings_section(ui, "OpenRouter API", |ui| {
+                egui::Grid::new("settings_openrouter")
                     .num_columns(2)
                     .spacing([10.0, 8.0])
                     .show(ui, |ui| {
@@ -74,22 +106,82 @@ pub fn draw_settings(ctx: &egui::Context, state: &mut SettingsState) -> Option<b
                                 .desired_width(field_width),
                         );
                         ui.end_row();
-
-                        settings_label(ui, "Model", label_width);
-                        egui::ComboBox::from_id_salt("model_select")
-                            .selected_text(&state.model)
-                            .width(field_width)
-                            .show_ui(ui, |ui| {
-                                for &model in MODELS {
-                                    ui.selectable_value(
-                                        &mut state.model,
-                                        model.to_string(),
-                                        model,
-                                    );
-                                }
-                            });
-                        ui.end_row();
                     });
+            });
+
+            // Models — one reads the audio, one writes the notes.
+            settings_section(ui, "Models", |ui| {
+                egui::Grid::new("settings_models")
+                    .num_columns(2)
+                    .spacing([10.0, 8.0])
+                    .show(ui, |ui| {
+                        model_picker(
+                            ui,
+                            "Transcribe",
+                            label_width,
+                            field_width,
+                            &mut state.transcription_model,
+                            &catalog.transcription_models(),
+                            Role::Transcription,
+                        );
+                        model_picker(
+                            ui,
+                            "Analyze",
+                            label_width,
+                            field_width,
+                            &mut state.analysis_model,
+                            &catalog.analysis_models(),
+                            Role::Analysis,
+                        );
+                    });
+
+                ui.add_space(6.0);
+
+                // Speaker labels, where the chosen model can produce them.
+                let supported = catalog::supports_diarization(&state.transcription_model);
+                ui.add_enabled_ui(supported, |ui| {
+                    ui.checkbox(&mut state.diarization, "Label speakers (diarization)");
+                });
+                let hint = if !supported {
+                    "This model returns plain text — no speaker labels. Pick a MAI-Transcribe model to label who said what."
+                } else if state.diarization {
+                    "Transcript will be split into Speaker 1, Speaker 2, … turns."
+                } else {
+                    "This model can label who said what — tick the box to turn it on."
+                };
+                ui.label(
+                    egui::RichText::new(hint)
+                        .color(if supported && !state.diarization {
+                            AppColors::BLUE
+                        } else {
+                            AppColors::TEXT_MUTED
+                        })
+                        .size(11.0),
+                );
+
+                ui.add_space(6.0);
+                let estimate = match total_cost_per_hour(
+                    &state.transcription_model,
+                    &state.analysis_model,
+                    catalog,
+                ) {
+                    Some(cost) => format!("Estimated ${cost:.2} per hour of recording"),
+                    None => "Cost estimate unavailable for this pair".into(),
+                };
+                ui.label(
+                    egui::RichText::new(estimate)
+                        .color(AppColors::TEXT_MUTED)
+                        .size(11.0),
+                );
+                if catalog.fetched_at.is_empty() {
+                    ui.label(
+                        egui::RichText::new(
+                            "Showing the built-in list — the live model list could not be fetched.",
+                        )
+                        .color(AppColors::TEXT_MUTED)
+                        .size(11.0),
+                    );
+                }
             });
 
             // Participants
@@ -180,6 +272,59 @@ pub fn draw_settings(ctx: &egui::Context, state: &mut SettingsState) -> Option<b
         });
 
     result
+}
+
+/// One model row: an editable slug plus a catalog dropdown that fills it in.
+///
+/// The text field is authoritative so any slug can be typed, including models
+/// the catalog does not list.
+fn model_picker(
+    ui: &mut egui::Ui,
+    label: &str,
+    label_width: f32,
+    field_width: f32,
+    selected: &mut String,
+    models: &[&ModelInfo],
+    role: Role,
+) {
+    settings_label(ui, label, label_width);
+    ui.vertical(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(selected)
+                .hint_text("provider/model-slug")
+                .desired_width(field_width),
+        );
+
+        egui::ComboBox::from_id_salt(format!("model_select_{label}"))
+            .selected_text(summary_for(selected, models, role))
+            .width(field_width)
+            .show_ui(ui, |ui| {
+                for model in models {
+                    let row = format!(
+                        "{}  ·  {}  ·  {}",
+                        model.id,
+                        model.context_label(),
+                        model.cost_label(role.cost_per_hour(model))
+                    );
+                    ui.selectable_value(selected, model.id.clone(), row);
+                }
+            });
+    });
+    ui.end_row();
+}
+
+/// Text shown on the closed dropdown: the model's cost, or a hint that the
+/// typed slug is not one the catalog knows about.
+fn summary_for(selected: &str, models: &[&ModelInfo], role: Role) -> String {
+    match models.iter().find(|m| m.id == selected) {
+        Some(model) => format!(
+            "{}  ·  {}",
+            model.context_label(),
+            model.cost_label(role.cost_per_hour(model))
+        ),
+        None if selected.trim().is_empty() => "Choose a model".into(),
+        None => "Custom model — not in catalog".into(),
+    }
 }
 
 fn settings_section(ui: &mut egui::Ui, title: &str, content: impl FnOnce(&mut egui::Ui)) {
