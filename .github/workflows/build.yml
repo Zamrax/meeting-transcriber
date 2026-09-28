@@ -88,6 +88,8 @@ jobs:
                 <string>1.0.0</string>
                 <key>LSMinimumSystemVersion</key>
                 <string>10.12</string>
+                <key>NSMicrophoneUsageDescription</key>
+                <string>This app needs microphone access to transcribe your meetings.</string>
             </dict>
             </plist>
           EOF
