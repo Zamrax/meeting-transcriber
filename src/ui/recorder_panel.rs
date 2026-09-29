@@ -1,4 +1,3 @@
-use egui::Color32;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -501,33 +500,13 @@ pub fn draw_recorder_panel(ui: &mut egui::Ui, state: &mut RecorderState) -> Opti
         // Warning display (non-fatal, e.g. silence detected)
         if !state.warning_text.is_empty() {
             ui.add_space(8.0);
-            egui::Frame::new()
-                .fill(Color32::from_rgba_premultiplied(255, 183, 77, 20))
-                .corner_radius(egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::same(10))
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(&state.warning_text)
-                            .color(Color32::from_rgb(255, 183, 77))
-                            .size(13.0),
-                    );
-                });
+            theme::alert_box(ui, &state.warning_text, AppColors::AMBER);
         }
 
         // Error display
         if !state.error_text.is_empty() {
             ui.add_space(8.0);
-            egui::Frame::new()
-                .fill(Color32::from_rgba_premultiplied(239, 83, 80, 20))
-                .corner_radius(egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::same(10))
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(&state.error_text)
-                            .color(AppColors::RED)
-                            .size(13.0),
-                    );
-                });
+            theme::alert_box(ui, &state.error_text, AppColors::RED);
         }
     });
 

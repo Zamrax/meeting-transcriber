@@ -249,17 +249,7 @@ impl eframe::App for MeetingTranscriberApp {
 
                     // Analysis error
                     if !self.analysis_error.is_empty() {
-                        egui::Frame::new()
-                            .fill(egui::Color32::from_rgba_premultiplied(239, 83, 80, 20))
-                            .corner_radius(egui::CornerRadius::same(8))
-                            .inner_margin(egui::Margin::same(12))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(&self.analysis_error)
-                                        .color(AppColors::RED)
-                                        .size(13.0),
-                                );
-                            });
+                        theme::alert_box(ui, &self.analysis_error, AppColors::RED);
                         ui.add_space(12.0);
                     }
 

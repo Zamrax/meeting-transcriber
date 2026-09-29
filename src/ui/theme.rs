@@ -31,6 +31,10 @@ impl AppColors {
     // Recording indicator
     pub const PULSE_ON: Color32 = Color32::from_rgb(239, 83, 80);
     pub const PULSE_OFF: Color32 = Color32::from_rgb(80, 80, 100);
+
+    // Widget interaction states
+    pub const HOVER: Color32 = Color32::from_rgb(50, 50, 65);
+    pub const ACTIVE: Color32 = Color32::from_rgb(60, 60, 78);
 }
 
 /// Apply a polished dark theme.
@@ -55,15 +59,18 @@ pub fn apply_dark_theme(ctx: &egui::Context) {
     visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
     visuals.widgets.inactive.bg_stroke = Stroke::new(0.5, AppColors::BORDER);
 
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(50, 50, 65);
+    visuals.widgets.hovered.bg_fill = AppColors::HOVER;
     visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, AppColors::BORDER_LIGHT);
 
-    visuals.widgets.active.bg_fill = Color32::from_rgb(60, 60, 78);
+    visuals.widgets.active.bg_fill = AppColors::ACTIVE;
     visuals.widgets.active.corner_radius = CornerRadius::same(6);
 
-    visuals.selection.bg_fill = AppColors::BLUE.linear_multiply(0.25);
-    visuals.selection.stroke = Stroke::new(1.0, AppColors::BLUE);
+    // Selected text is drawn in `stroke` on top of `bg_fill` — keep them
+    // different hues (bright blue fill, near-white text) so a selected
+    // item (e.g. the audio source picker) doesn't render as blue-on-blue.
+    visuals.selection.bg_fill = AppColors::BLUE_DARK;
+    visuals.selection.stroke = Stroke::new(1.0, AppColors::TEXT_PRIMARY);
 
     // Separators
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(0.5, AppColors::BORDER);
@@ -115,6 +122,23 @@ pub fn primary_button(text: &str, color: Color32) -> egui::Button<'_> {
     .fill(color)
     .corner_radius(CornerRadius::same(6))
     .min_size(egui::vec2(0.0, 34.0))
+}
+
+/// Draw a tinted inline alert box (error/warning/info banner).
+///
+/// Uses *unmultiplied* alpha so the fill is a genuine low-opacity tint of
+/// `color` over the panel background — `from_rgba_premultiplied` with a
+/// full-intensity color and a low alpha renders as nearly opaque, which
+/// made the text unreadable against its own background (color-on-color).
+pub fn alert_box(ui: &mut egui::Ui, text: &str, color: Color32) {
+    egui::Frame::new()
+        .fill(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 30))
+        .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 80)))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).color(color).size(13.0));
+        });
 }
 
 /// Create a styled secondary/outline button.
