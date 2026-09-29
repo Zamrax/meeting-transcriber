@@ -176,33 +176,32 @@ impl OpenRouterClient {
 
     /// Transcribe one chunk with a dedicated speech-to-text model.
     ///
-    /// This is the OpenAI-compatible multipart endpoint. These models take no
-    /// instructions, so speaker labels and chunk position are not available
-    /// here — the transcript comes back as plain text.
+    /// This uses the JSON form of the transcription endpoint rather than the
+    /// OpenAI-compatible multipart form: OpenRouter silently drops provider
+    /// options (and so diarization) from multipart requests. These models
+    /// take no instructions, so chunk position is not available here.
     fn transcribe_chunk_asr(
         &self,
         audio: Vec<u8>,
         participant_names: Option<&[String]>,
     ) -> Result<String, String> {
-        let part = reqwest::blocking::multipart::Part::bytes(audio)
-            .file_name("chunk.mp3")
-            .mime_str("audio/mpeg")
-            .map_err(|e| format!("Failed to build audio upload: {e}"))?;
+        let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&audio);
 
         // verbose_json carries the per-segment speaker labels; a model that
         // ignores it still returns the plain `text` field.
-        let mut form = reqwest::blocking::multipart::Form::new()
-            .text("model", self.transcription_model.clone())
-            .text("response_format", "verbose_json")
-            .part("file", part);
+        let mut body = serde_json::json!({
+            "model": self.transcription_model,
+            "input_audio": {"data": audio_b64, "format": "mp3"},
+            "response_format": "verbose_json"
+        });
 
         if let Some(options) = self.azure_provider_options(participant_names) {
-            form = form.text("provider", options.to_string());
+            body["provider"] = options;
         }
 
         let resp = self
             .authenticated_post(&format!("{BASE_URL}/audio/transcriptions"))
-            .multipart(form)
+            .json(&body)
             .send()
             .map_err(|e| format!("Transcription request failed: {e}"))?;
 
@@ -218,7 +217,7 @@ impl OpenRouterClient {
         let json: Value = serde_json::from_str(&text)
             .map_err(|e| format!("Failed to parse transcription response JSON: {e}"))?;
 
-        Ok(transcript_from_response(&json)?)
+        transcript_from_response(&json)
     }
 
     /// Azure-hosted MAI-Transcribe models take diarization and keyword biasing
@@ -386,12 +385,14 @@ fn diarized_transcript(response: &Value) -> Option<String> {
         }
 
         // Providers spell the field either way, and number or name the speaker.
+        // OpenRouter numbers speakers from 0; people count from 1.
         let speaker = segment
             .get("speaker")
             .or_else(|| segment.get("speaker_id"))
-            .map(|s| match s.as_str() {
-                Some(name) => name.to_string(),
-                None => format!("Speaker {s}"),
+            .map(|s| match (s.as_str(), s.as_u64()) {
+                (Some(name), _) => name.to_string(),
+                (None, Some(index)) => format!("Speaker {}", index + 1),
+                (None, None) => format!("Speaker {s}"),
             });
 
         match speaker {
@@ -577,11 +578,11 @@ mod tests {
     #[test]
     fn test_numeric_speaker_ids_are_labelled() {
         let response = serde_json::json!({
-            "segments": [{"speaker_id": 0, "text": "Hi"}, {"speaker_id": 1, "text": "Hello"}]
+            "segments": [{"speaker": 0, "text": "Hi"}, {"speaker_id": 1, "text": "Hello"}]
         });
         assert_eq!(
             transcript_from_response(&response).unwrap(),
-            "Speaker 0: Hi\nSpeaker 1: Hello"
+            "Speaker 1: Hi\nSpeaker 2: Hello"
         );
     }
 
